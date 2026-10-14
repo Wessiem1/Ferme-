@@ -1,0 +1,17 @@
+{
+  "name": "Carnet de ferme",
+  "short_name": "Ferme",
+  "description": "Gestion de ferme : animaux, cultures, stocks, finances et suivi journalier.",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eef1ea",
+  "theme_color": "#2c6b3f",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
