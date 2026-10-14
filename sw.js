@@ -1,7 +1,7 @@
 /* Carnet de ferme : mode hors connexion.
    Les pages sont chargées depuis le réseau quand il est disponible, sinon depuis le cache.
    Changez le numéro de version ci-dessous à chaque mise à jour de l'application. */
-const V = 'carnet-de-ferme-v1';
+const V = 'carnet-de-ferme-v2';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {

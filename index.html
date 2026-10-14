@@ -172,6 +172,15 @@ textarea{resize:vertical}
 .note{font-size:13px;color:var(--muted)}
 textarea.mono{font:13px/1.4 ui-monospace,Menlo,Consolas,monospace}
 
+.syncpill{display:inline-flex;align-items:center;gap:6px;margin-left:8px;padding:2px 10px;min-height:28px;border:1px solid var(--line);border-radius:99px;background:var(--surface);color:var(--muted);font:600 12px var(--f-body);text-transform:none;cursor:pointer;vertical-align:middle}
+.syncpill i{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.syncpill.ok i{background:var(--accent)}
+.syncpill.busy i,.syncpill.pending i,.syncpill.offline i{background:var(--ochre)}
+.syncpill.err i,.syncpill.denied i{background:var(--bad)}
+.ro .wbtn,.ro .mv{display:none}
+.ro .rbody,.ro .row.tap,.ro .chk{pointer-events:none;cursor:default}
+.ro .chk{opacity:.55}
+ol.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--ink)}
 #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(88px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:99px;font-weight:600;font-size:14px;z-index:60;max-width:90%;text-align:center}
 @media (prefers-reduced-motion:no-preference){.sheet{animation:up .18s ease-out}@keyframes up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}}
 </style>
@@ -243,11 +252,14 @@ var DB=null, storageOK=true;
 var EMPTY=function(){return {v:1,farm:{name:'Ma ferme',currency:'FCFA'},users:[],animals:[],health:[],feeds:[],crops:[],acts:[],stock:[],moves:[],expenses:[],sales:[],tasks:[],journal:{}}};
 function migrate(d){var e=EMPTY();for(var k in e){if(d[k]===undefined)d[k]=e[k]}return d}
 function load(){try{var r=localStorage.getItem(KEY);if(r){var d=JSON.parse(r);if(d&&Array.isArray(d.users))return migrate(d)}}catch(e){storageOK=false}return null}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(DB))}catch(e){storageOK=false}}
+function saveRaw(){try{localStorage.setItem(KEY,JSON.stringify(DB))}catch(e){storageOK=false}}
+function save(){saveRaw();if(SY.on){detect();saveSY();syncSoon()}}
 var S={uid:null,tab:'home',sub:{home:'jour',animals:'liste',crops:'cultures',stock:'tous',fin:'resume'},month:0,loginFor:null,pinErr:false,showDone:false};
-var me=function(){return DB&&DB.users.find(function(u){return u.id===S.uid})};
-var isOwner=function(){var u=me();return !!u&&u.role==='owner'};
-var roleL=function(r){return r==='owner'?'Propriétaire':'Employé'};
+var VIEWER={id:'__viewer__',name:'Observateur',role:'observer',pin:null};
+var me=function(){if(S.uid==='__viewer__'&&SY.role==='view')return VIEWER;return DB&&DB.users.find(function(u){return u.id===S.uid})};
+var isOwner=function(){var u=me();return !!u&&u.role==='owner'&&SY.role!=='view'};
+var RO=function(){var u=me();return !!u&&(u.role==='observer'||SY.role==='view')};
+var roleL=function(r){return r==='owner'?'Propriétaire':r==='observer'?'Observateur':'Employé'};
 function put(col,x,o){if(x){Object.assign(x,o)}else{var n=Object.assign({id:uid(),at:Date.now(),by:me().name},o);DB[col].push(n)}save()}
 function rm(col,x){DB[col]=DB[col].filter(function(i){return i!==x});save()}
 var animalName=function(id){return (!id||id==='all')?'Tous les animaux':((DB.animals.find(function(a){return a.id===id})||{}).nom||'Animal supprimé')};
@@ -304,7 +316,7 @@ function fld(label,name,val,o){
 var dl=function(id,arr){return '<datalist id="'+id+'">'+arr.map(function(x){return '<option value="'+esc(x)+'"></option>'}).join('')+'</datalist>'};
 var NUM='type="number" ';
 var two=function(a,b){return '<div class="two">'+a+b+'</div>'};
-var head=function(t,b,a,extra){return '<div class="head"><h2>'+t+'</h2>'+(b?'<button class="btn small primary" data-act="'+a+'" '+(extra||'')+'>'+ico('plus',16)+' '+b+'</button>':'')+'</div>'};
+var head=function(t,b,a,extra){return '<div class="head"><h2>'+t+'</h2>'+(b&&!RO()?'<button class="btn small primary" data-act="'+a+'" '+(extra||'')+'>'+ico('plus',16)+' '+b+'</button>':'')+'</div>'};
 var empty=function(t){return '<div class="empty">'+t+'</div>'};
 var rowTap=function(act,id,main,sub,right){return '<button class="row tap" data-act="'+act+'" data-id="'+esc(id)+'"><span class="rbody static"><strong>'+main+'</strong><span class="meta">'+sub+'</span></span>'+(right?'<span class="right">'+right+'</span>':'')+'</button>'};
 var sp=function(a){return a.filter(Boolean).map(function(x){return '<span>'+x+'</span>'}).join('')};
@@ -317,7 +329,7 @@ function arm(el,label,fn){
 
 /* ---------- Feuille de formulaire ---------- */
 var sheetSave=null,sheetDel=null;
-function openForm(title,body,onSave,o){
+function openForm(title,body,onSave,o){if(RO()&&!(o&&o.ro)){toast('Lecture seule : modification impossible.');return}
   o=o||{};
   $('#sheet').innerHTML='<div class="scrim" data-act="close"></div><form class="sheet" data-form="sheet" autocomplete="off"><div class="sheet-h"><h2>'+title+'</h2><button type="button" class="btn small" data-act="close" aria-label="Fermer">Fermer</button></div><div class="sheet-b">'+body+'</div><div class="sheet-f">'+(o.del?'<button type="button" class="btn bad" data-act="sheet-del">Supprimer</button>':'')+'<button class="btn primary" type="submit">'+(o.ok||'Enregistrer')+'</button></div></form>';
   sheetSave=onSave;sheetDel=o.del||null;$('#sheet').hidden=false;document.body.classList.add('lock');
@@ -327,13 +339,13 @@ function closeSheet(){var s=$('#sheet');s.hidden=true;s.innerHTML='';document.bo
 /* ---------- Vues principales ---------- */
 function render(){
   var app=$('#app');
-  if(!DB||!DB.users.length){app.innerHTML=setupView();return}
+  if(!DB||(!DB.users.length&&SY.role!=='view')){app.innerHTML=setupView();return}
   if(!me()){app.innerHTML=loginView();return}
-  if(S.tab==='fin'&&!isOwner())S.tab='home';
+  if(S.tab==='fin'&&!isOwner())S.tab='home';try{document.body.classList.toggle('ro',RO())}catch(e){}
   app.innerHTML=topbar()+'<main>'+view()+'</main>'+nav()}
 function topbar(){
   var u=me();
-  return '<header class="top"><div class="brand"><h1>'+esc(DB.farm.name)+'</h1><p>'+esc(fdate(today(),true))+'</p></div><button class="who" data-act="goto" data-tab="settings" aria-label="Profil et réglages"><span class="av">'+esc(u.name.trim().charAt(0).toUpperCase())+'</span><span class="wn">'+esc(u.name)+'</span></button></header>'
+  return '<header class="top"><div class="brand"><h1>'+esc(DB.farm.name)+'</h1><p>'+esc(fdate(today(),true))+pill()+'</p></div><button class="who" data-act="goto" data-tab="settings" aria-label="Profil et réglages"><span class="av">'+esc(u.name.trim().charAt(0).toUpperCase())+'</span><span class="wn">'+esc(u.name)+'</span></button></header>'
    +(storageOK?'':'<div class="warn-banner">L’enregistrement est bloqué dans ce navigateur. Les données seront perdues à la fermeture. Copiez une sauvegarde depuis les réglages.</div>')}
 function nav(){
   var tabs=[['home','Accueil','home'],['animals','Animaux','paw'],['crops','Cultures','sprout'],['stock','Stocks','box']];
@@ -349,7 +361,7 @@ function setupView(){
    +fld('Nom de la ferme','farm','',{attrs:'required placeholder="Ex. Ferme du Fleuve"'})
    +fld('Votre prénom','user','',{attrs:'required'})
    +two(fld('Code PIN (4 chiffres, facultatif)','pin','',{type:'password',attrs:'inputmode="numeric" maxlength="4" pattern="[0-9]*" autocomplete="new-password"'}),fld('Monnaie','currency','FCFA',{attrs:'required'}))
-   +'<label class="chk-l"><input type="checkbox" name="demo" checked><span>Ajouter des exemples pour découvrir l’application</span></label><button class="btn primary" type="submit">Commencer</button></form></div>'}
+   +'<label class="chk-l"><input type="checkbox" name="demo" checked><span>Ajouter des exemples pour découvrir l’application</span></label><button class="btn primary" type="submit">Commencer</button><button class="btn" type="button" data-act="join">J’ai un code d’invitation</button></form></div>'}
 function loginView(){
   var f=DB.users.find(function(u){return u.id===S.loginFor});
   return '<div class="gate"><div class="gate-in"><div><h1>'+esc(DB.farm.name)+'</h1><p class="muted" style="margin-top:6px">Qui utilise l’application ?</p></div><div class="list">'
@@ -360,7 +372,7 @@ function loginView(){
 /* ---------- Accueil ---------- */
 function homeView(){
   var sub=S.sub.home;
-  return (hasDemo()?'<div class="demo-banner"><span>Des données d’exemple sont affichées.</span><button class="btn small" data-act="demo-clear">Supprimer les exemples</button></div>':'')
+  return (hasDemo()&&!RO()?'<div class="demo-banner"><span>Des données d’exemple sont affichées.</span><button class="btn small" data-act="demo-clear">Supprimer les exemples</button></div>':'')
    +seg('home',[['jour','Aujourd’hui'],['taches','Tâches'],['journal','Journal']])
    +(sub==='jour'?homeJour():sub==='taches'?homeTasks():homeJournal())}
 function taskRow(x){
@@ -383,14 +395,14 @@ function homeJour(){
   if(late)al.push({sev:'bad',txt:late+' tâche'+(late>1?'s':'')+' en retard',tab:'home',key:'home',v:'taches'});
   DB.crops.filter(function(c){return c.recolte&&['Semé','En croissance'].indexOf(c.statut)>=0&&c.recolte<=addDays(t,14)}).forEach(function(c){
     var d=diffDays(c.recolte,t);al.push({sev:'warn',txt:'Récolte '+esc(c.nom)+' '+(d<0?'dépassée de '+(-d)+' j':d===0?'aujourd’hui':'dans '+d+' j'),tab:'crops'})});
-  if(!j)al.push({sev:'info',txt:'Le suivi du jour n’est pas encore rempli',act:'journal-new'});
+  if(!j&&!RO())al.push({sev:'info',txt:'Le suivi du jour n’est pas encore rempli',act:'journal-new'});
   var alHtml=al.length?al.map(function(a){return '<button class="alert '+a.sev+'" '+(a.act?'data-act="'+a.act+'"':'data-act="goto" data-tab="'+a.tab+'"'+(a.key?' data-key="'+a.key+'" data-v="'+a.v+'"':''))+'><i class="dot"></i><span>'+a.txt+'</span></button>'}).join(''):'<div class="alert ok"><i class="dot"></i><span>Rien d’urgent pour le moment.</span></div>';
   return '<div class="stats"><div class="stat"><b>'+fmtN(animaux)+'</b><span>animaux actifs</span></div><div class="stat"><b>'+due.length+'</b><span>tâche'+(due.length>1?'s':'')+' du jour</span></div><div class="stat"><b>'+low.length+'</b><span>stock'+(low.length>1?'s':'')+' bas</span></div>'+fourth+'</div>'
    +'<h3 class="sub">À surveiller</h3><div class="alerts">'+alHtml+'</div>'
    +head('Tâches du jour','Tâche','task-new')
    +(due.length?'<div class="list">'+due.map(taskRow).join('')+'</div>':empty('Aucune tâche prévue pour aujourd’hui.'))
    +head('Suivi journalier')
-   +(j?'<div class="list">'+journalRow(t)+'</div>':'<button class="btn primary" data-act="journal-new" style="width:100%">Remplir le suivi du jour</button>')}
+   +(j?'<div class="list">'+journalRow(t)+'</div>':(RO()?'<div class="empty">Le suivi du jour n’est pas encore rempli.</div>':'<button class="btn primary" data-act="journal-new" style="width:100%">Remplir le suivi du jour</button>'))}
 function homeTasks(){
   var t=today(),open=DB.tasks.filter(function(x){return !x.done}),done=DB.tasks.filter(function(x){return x.done}).sort(function(a,b){return (b.doneAt||0)-(a.doneAt||0)}).slice(0,15);
   var g={late:[],today:[],soon:[],none:[]};
@@ -463,7 +475,7 @@ function healthList(){
   return head('Santé et traitements','Ajouter','health-new')
    +(rem.length?'<h3 class="sub">Rappels</h3><div class="list">'+rem.map(function(h){
       var d=diffDays(h.rappel,t),cls=d<0?'bad':d<=7?'warn':'';
-      return '<div class="row"><div class="rbody static"><strong>'+esc(h.type)+' · '+esc(animalName(h.animalId))+'</strong><span class="meta"><em class="'+cls+'">'+(d<0?'En retard de '+(-d)+' j':d===0?'Aujourd’hui':'Dans '+d+' j · '+esc(fdate(h.rappel)))+'</em>'+sp([esc(h.produit||'')])+'</span></div><button class="btn small" data-act="health-done" data-id="'+h.id+'">Fait</button></div>'}).join('')+'</div>':'')
+      return '<div class="row"><div class="rbody static"><strong>'+esc(h.type)+' · '+esc(animalName(h.animalId))+'</strong><span class="meta"><em class="'+cls+'">'+(d<0?'En retard de '+(-d)+' j':d===0?'Aujourd’hui':'Dans '+d+' j · '+esc(fdate(h.rappel)))+'</em>'+sp([esc(h.produit||'')])+'</span></div><button class="btn small wbtn" data-act="health-done" data-id="'+h.id+'">Fait</button></div>'}).join('')+'</div>':'')
    +'<h3 class="sub">Historique</h3>'
    +(rows.length?'<div class="list">'+rows.map(function(h){return rowTap('health-edit',h.id,esc(h.type)+' · '+esc(animalName(h.animalId)),sp([esc(fdate(h.date)),esc(h.produit||''),esc(h.dose||'')]),'')}).join('')+'</div>':empty('Aucun soin enregistré. Notez vaccins, vermifuges et traitements, avec une date de rappel.'))}
 function healthForm(id){
@@ -511,7 +523,7 @@ function cropList(){
       var harv=Object.keys(h).map(function(u){return fmtN(h[u])+' '+esc(u)}).join(' + ');
       var prog='';
       if(c.semis&&c.recolte&&(c.statut==='Semé'||c.statut==='En croissance')){var tot=Math.max(1,diffDays(c.recolte,c.semis)),cur=Math.min(tot,Math.max(0,diffDays(t,c.semis)));prog='<span class="bar" style="margin-top:6px"><i style="width:'+Math.round(cur/tot*100)+'%"></i></span><span class="meta">Jour '+cur+' sur '+tot+' · récolte prévue le '+esc(fdate(c.recolte))+'</span>'}
-      return '<div class="row"><button class="rbody" data-act="crop-edit" data-id="'+c.id+'"><strong>'+esc(c.nom)+(c.parcelle?' <span class="muted">· '+esc(c.parcelle)+'</span>':'')+'</strong><span class="meta">'+sp([c.surface?fmtN(num(c.surface))+' ha':'',c.semis?'Semé le '+esc(fdate(c.semis)):'',harv?'Récolté : '+harv:''])+'</span>'+prog+'</button><span style="display:flex;flex-direction:column;gap:6px;align-items:flex-end"><span class="pill '+(c.statut==='En croissance'||c.statut==='Semé'?'good':'')+'">'+esc(c.statut)+'</span><button class="btn small" data-act="act-new" data-crop="'+c.id+'">Activité</button></span></div>'}).join('')+'</div>'
+      return '<div class="row"><button class="rbody" data-act="crop-edit" data-id="'+c.id+'"><strong>'+esc(c.nom)+(c.parcelle?' <span class="muted">· '+esc(c.parcelle)+'</span>':'')+'</strong><span class="meta">'+sp([c.surface?fmtN(num(c.surface))+' ha':'',c.semis?'Semé le '+esc(fdate(c.semis)):'',harv?'Récolté : '+harv:''])+'</span>'+prog+'</button><span style="display:flex;flex-direction:column;gap:6px;align-items:flex-end"><span class="pill '+(c.statut==='En croissance'||c.statut==='Semé'?'good':'')+'">'+esc(c.statut)+'</span><button class="btn small wbtn" data-act="act-new" data-crop="'+c.id+'">Activité</button></span></div>'}).join('')+'</div>'
      :empty('Aucune culture. Ajoutez une parcelle avec sa date de semis et sa récolte prévue.'))}
 function cropForm(id){
   var x=DB.crops.find(function(c){return c.id===id});
@@ -640,18 +652,18 @@ function expForm(id){
 
 /* ---------- Réglages et utilisateurs ---------- */
 function settingsView(){
-  var u=me(),own=isOwner();
+  var u=me(),own=isOwner();if(SY.role==='view')return viewerSettings();
   return '<h2 class="page-t">Réglages</h2>'
    +'<section class="card"><div class="pf"><span class="av big">'+esc(u.name.trim().charAt(0).toUpperCase())+'</span><div><strong>'+esc(u.name)+'</strong><span class="muted">'+roleL(u.role)+'</span></div></div><div class="btns"><button class="btn" data-act="pin-change">'+(u.pin?'Changer mon code PIN':'Ajouter un code PIN')+'</button><button class="btn" data-act="logout">Changer d’utilisateur</button></div></section>'
    +(own?'<section class="card"><h3>Ferme</h3><div><strong>'+esc(DB.farm.name)+'</strong><span class="muted"> · '+esc(DB.farm.currency)+'</span></div><div class="btns"><button class="btn" data-act="farm-edit">Modifier</button></div></section>'
-    +'<section class="card"><h3>Utilisateurs</h3><div class="list">'+DB.users.map(function(x){return rowTap('user-edit',x.id,esc(x.name)+(x.id===u.id?' <span class="muted">(vous)</span>':''),sp([roleL(x.role),x.pin?'Code PIN':'Sans code']),'')}).join('')+'</div><div class="btns"><button class="btn primary" data-act="user-new">Ajouter un utilisateur</button></div><p class="note">Les employés voient les animaux, cultures, stocks et tâches. Les finances et les réglages restent réservés aux propriétaires. Le code PIN est une protection légère : les données ne sont pas chiffrées sur le téléphone.</p></section>'
+    +syncCard()+'<section class="card"><h3>Utilisateurs</h3><div class="list">'+DB.users.map(function(x){return rowTap('user-edit',x.id,esc(x.name)+(x.id===u.id?' <span class="muted">(vous)</span>':''),sp([roleL(x.role),x.pin?'Code PIN':'Sans code']),'')}).join('')+'</div><div class="btns"><button class="btn primary" data-act="user-new">Ajouter un utilisateur</button></div><p class="note">Les employés voient les animaux, cultures, stocks et tâches et peuvent les modifier. Les observateurs consultent les mêmes écrans sans rien modifier. Les finances et les réglages restent réservés aux propriétaires. Le code PIN est une protection légère : les données ne sont pas chiffrées sur le téléphone.</p></section>'
     +'<section class="card"><h3>Sauvegarde</h3><p class="note">Les données sont enregistrées dans ce navigateur, sur ce téléphone. Copiez une sauvegarde de temps en temps et gardez-la dans vos notes ou vos messages.</p><div class="btns"><button class="btn" data-act="backup">Copier une sauvegarde</button><button class="btn" data-act="restore">Restaurer</button></div></section>'
-    +'<section class="card"><h3>Zone sensible</h3><div class="btns">'+(hasDemo()?'<button class="btn" data-act="demo-clear">Supprimer les exemples</button>':'')+'<button class="btn bad" data-act="reset">Tout effacer</button></div></section>':'')}
+    +'<section class="card"><h3>Zone sensible</h3><p class="note">« Tout effacer » vide ce téléphone et coupe la synchronisation ici. Les données en ligne et les autres téléphones ne sont pas touchés.</p><div class="btns">'+(hasDemo()?'<button class="btn" data-act="demo-clear">Supprimer les exemples</button>':'')+'<button class="btn bad" data-act="reset">Tout effacer</button></div></section>':'')}
 function userForm(id){
   var x=DB.users.find(function(u){return u.id===id}),owners=DB.users.filter(function(u){return u.role==='owner'}),lastOwner=x&&x.role==='owner'&&owners.length===1,self=x&&x.id===S.uid;
   openForm(x?'Modifier l’utilisateur':'Nouvel utilisateur',
     fld('Prénom','name',x&&x.name,{attrs:'required'})
-    +fld('Rôle','role',x?x.role:'worker',{type:'select',options:lastOwner?[['owner','Propriétaire']]:[['worker','Employé'],['owner','Propriétaire']]})
+    +fld('Rôle','role',x?x.role:'worker',{type:'select',options:lastOwner?[['owner','Propriétaire']]:[['worker','Employé'],['observer','Observateur'],['owner','Propriétaire']]})
     +fld(x?'Nouveau code PIN (vide = inchangé)':'Code PIN (4 chiffres, facultatif)','pin','',{type:'password',attrs:'inputmode="numeric" maxlength="4" pattern="[0-9]*" autocomplete="new-password"'})
     +(x&&x.pin?'<label class="chk-l"><input type="checkbox" name="removePin"><span>Retirer le code PIN</span></label>':''),
     function(d){
@@ -664,7 +676,7 @@ function userForm(id){
 function pinForm(){
   var u=me();
   openForm('Code PIN',fld('Nouveau code PIN (4 chiffres)','pin','',{type:'password',attrs:'inputmode="numeric" maxlength="4" pattern="[0-9]*" autocomplete="new-password"'})+'<p class="note">Laissez vide pour retirer le code PIN.</p>',
-    function(d){if(d.pin&&!/^\d{4}$/.test(d.pin)){toast('Le code PIN doit avoir 4 chiffres.');return false}u.pin=d.pin?pinHash(d.pin,u.id):null;save();render();toast(d.pin?'Code PIN enregistré.':'Code PIN retiré.')})}
+    function(d){if(d.pin&&!/^\d{4}$/.test(d.pin)){toast('Le code PIN doit avoir 4 chiffres.');return false}u.pin=d.pin?pinHash(d.pin,u.id):null;save();render();toast(d.pin?'Code PIN enregistré.':'Code PIN retiré.')},{ro:true})}
 function farmForm(){
   openForm('Ferme',fld('Nom de la ferme','name',DB.farm.name,{attrs:'required'})+fld('Monnaie','currency',DB.farm.currency,{attrs:'required'}),
     function(d){if(!d.name.trim())return false;DB.farm.name=d.name.trim();DB.farm.currency=(d.currency||'FCFA').trim();save();render()})}
@@ -676,15 +688,241 @@ function backupForm(){
       try{navigator.clipboard.writeText(json).then(function(){toast('Sauvegarde copiée.')},fallback)}catch(e){fallback()}
       return false},{ok:'Copier'})}
 function restoreForm(){
-  openForm('Restaurer','<p class="note">Collez une sauvegarde. Les données actuelles seront remplacées.</p><textarea class="mono" name="json" id="f-json" rows="8" required></textarea>',
+  openForm('Restaurer','<p class="note">Collez une sauvegarde. Les données actuelles seront remplacées, et avec la synchronisation active, sur tous les téléphones.</p><textarea class="mono" name="json" id="f-json" rows="8" required></textarea>',
     function(d){
       var p;try{p=JSON.parse(d.json)}catch(e){toast('Ce texte n’est pas une sauvegarde valide.');return false}
       if(!p||!Array.isArray(p.users)||!p.users.some(function(u){return u.role==='owner'})){toast('Sauvegarde incomplète.');return false}
       DB=migrate(p);S.uid=null;S.tab='home';save();render();toast('Données restaurées.')},{ok:'Restaurer'})}
 
+/* ---------- Synchronisation en ligne ---------- */
+var SYKEY='carnet-de-ferme-sync-v1';
+var SY={on:false,url:'',key:'',farm:'',access:'',viewKey:'',role:'edit',lastPull:0,offset:0,snap:{},meta:{},dirty:{},last:0,status:'off',err:''};
+var SY_SAVED=['on','url','key','farm','access','viewKey','role','lastPull','offset','snap','meta','dirty','last'];
+var KNOWN=COLS.concat(['users','journal','farm']);
+var SQL_TEXT="-- Carnet de ferme : script de synchronisation.\n-- \u00c0 ex\u00e9cuter UNE SEULE FOIS dans Supabase (SQL Editor), puis toucher \"Run\".\n-- Les donn\u00e9es ne sont jamais lisibles directement : tout passe par des fonctions\n-- prot\u00e9g\u00e9es par un code secret (code \"modification\" ou code \"lecture seule\").\n\ncreate table if not exists public.cf_farms (\n  id uuid primary key default gen_random_uuid(),\n  edit_hash text not null,\n  view_hash text not null,\n  created_at timestamptz not null default now()\n);\n\ncreate table if not exists public.cf_records (\n  farm_id uuid not null references public.cf_farms(id) on delete cascade,\n  col text not null,\n  rid text not null,\n  data jsonb,\n  deleted boolean not null default false,\n  client_u bigint not null default 0,\n  updated_at timestamptz not null default now(),\n  primary key (farm_id, col, rid)\n);\n\ncreate index if not exists cf_records_pull on public.cf_records (farm_id, updated_at);\n\nalter table public.cf_farms enable row level security;\nalter table public.cf_records enable row level security;\nrevoke all on public.cf_farms from anon, authenticated;\nrevoke all on public.cf_records from anon, authenticated;\n\ncreate or replace function public.cf_hash(t text) returns text\nlanguage sql immutable as $$\n  select encode(sha256(convert_to(t, 'utf8')), 'hex')\n$$;\n\ncreate or replace function public.cf_role(p_farm uuid, p_key text) returns text\nlanguage sql stable security definer set search_path = public as $$\n  select case\n    when edit_hash = public.cf_hash(p_key) then 'edit'\n    when view_hash = public.cf_hash(p_key) then 'view'\n    else null\n  end\n  from public.cf_farms where id = p_farm\n$$;\n\ncreate or replace function public.cf_create_farm(p_edit text, p_view text) returns uuid\nlanguage plpgsql security definer set search_path = public as $$\ndeclare v_id uuid;\nbegin\n  if p_edit is null or p_view is null or length(p_edit) < 16 or length(p_view) < 16 or p_edit = p_view then\n    raise exception 'codes invalides';\n  end if;\n  insert into public.cf_farms (edit_hash, view_hash)\n  values (public.cf_hash(p_edit), public.cf_hash(p_view))\n  returning id into v_id;\n  return v_id;\nend\n$$;\n\ncreate or replace function public.cf_pull(p_farm uuid, p_key text, p_since bigint) returns jsonb\nlanguage plpgsql security definer set search_path = public as $$\ndeclare v_role text; v_recs jsonb;\nbegin\n  v_role := public.cf_role(p_farm, p_key);\n  if v_role is null then raise exception 'acces refuse'; end if;\n  select coalesce(jsonb_agg(jsonb_build_object('c', col, 'i', rid, 'd', data, 'x', deleted, 'u', client_u)), '[]'::jsonb)\n    into v_recs\n    from public.cf_records\n   where farm_id = p_farm\n     and updated_at > to_timestamp(greatest(coalesce(p_since, 0), 0) / 1000.0)\n     and (v_role = 'edit' or col not in ('users', 'sales', 'expenses'));\n  return jsonb_build_object(\n    'role', v_role,\n    'now', floor(extract(epoch from clock_timestamp()) * 1000)::bigint,\n    'records', v_recs\n  );\nend\n$$;\n\ncreate or replace function public.cf_push(p_farm uuid, p_key text, p_records jsonb) returns integer\nlanguage plpgsql security definer set search_path = public as $$\ndeclare r jsonb; n integer := 0;\nbegin\n  if public.cf_role(p_farm, p_key) is distinct from 'edit' then raise exception 'acces refuse'; end if;\n  if jsonb_typeof(p_records) <> 'array' or jsonb_array_length(p_records) > 500 then\n    raise exception 'envoi invalide';\n  end if;\n  for r in select value from jsonb_array_elements(p_records) loop\n    insert into public.cf_records (farm_id, col, rid, data, deleted, client_u, updated_at)\n    values (\n      p_farm, r->>'c', r->>'i', r->'d',\n      coalesce((r->>'x')::boolean, false),\n      coalesce((r->>'u')::bigint, 0),\n      now()\n    )\n    on conflict (farm_id, col, rid) do update\n      set data = excluded.data,\n          deleted = excluded.deleted,\n          client_u = excluded.client_u,\n          updated_at = now()\n      where public.cf_records.client_u <= excluded.client_u;\n    n := n + 1;\n  end loop;\n  return n;\nend\n$$;\n\ncreate or replace function public.cf_rotate(p_farm uuid, p_key text, p_edit text, p_view text) returns boolean\nlanguage plpgsql security definer set search_path = public as $$\nbegin\n  if public.cf_role(p_farm, p_key) is distinct from 'edit' then raise exception 'acces refuse'; end if;\n  if p_edit is null or p_view is null or length(p_edit) < 16 or length(p_view) < 16 or p_edit = p_view then\n    raise exception 'codes invalides';\n  end if;\n  update public.cf_farms\n     set edit_hash = public.cf_hash(p_edit), view_hash = public.cf_hash(p_view)\n   where id = p_farm;\n  return true;\nend\n$$;\n\nrevoke execute on function public.cf_hash(text) from public, anon, authenticated;\nrevoke execute on function public.cf_role(uuid, text) from public, anon, authenticated;\ngrant execute on function public.cf_create_farm(text, text) to anon, authenticated;\ngrant execute on function public.cf_pull(uuid, text, bigint) to anon, authenticated;\ngrant execute on function public.cf_push(uuid, text, jsonb) to anon, authenticated;\ngrant execute on function public.cf_rotate(uuid, text, text, text) to anon, authenticated;\n\nnotify pgrst, 'reload schema';\n";
+function loadSY(){try{var r=localStorage.getItem(SYKEY);if(r){var d=JSON.parse(r);SY_SAVED.forEach(function(k){if(d[k]!==undefined)SY[k]=d[k]})}}catch(e){}SY.status=SY.on?'idle':'off'}
+function saveSY(){try{var o={};SY_SAVED.forEach(function(k){o[k]=SY[k]});localStorage.setItem(SYKEY,JSON.stringify(o))}catch(e){}}
+function resetSY(){SY.on=false;SY.url='';SY.key='';SY.farm='';SY.access='';SY.viewKey='';SY.role='edit';SY.lastPull=0;SY.offset=0;SY.snap={};SY.meta={};SY.dirty={};SY.last=0;SY.status='off';SY.err=''}
+function canon(v){return JSON.stringify(v,function(k,val){if(val&&typeof val==='object'&&!Array.isArray(val)){var o={};Object.keys(val).sort().forEach(function(key){o[key]=val[key]});return o}return val})}
+function enumerate(){
+  var o={},add=function(c,i,d){o[c+'|'+i]={c:c,i:i,d:d,h:hash(canon(d))}};
+  COLS.concat(['users']).forEach(function(c){if(SY.role==='view'&&c==='users')return;(DB[c]||[]).forEach(function(x){if(x&&x.id)add(c,x.id,x)})});
+  Object.keys(DB.journal||{}).forEach(function(k){add('journal',k,DB.journal[k])});
+  add('farm','farm',DB.farm);
+  return o}
+function nowU(){return Date.now()+(SY.offset||0)}
+function detect(){
+  if(!SY.on||!DB)return;
+  var cur=enumerate(),now=nowU(),k;
+  for(k in cur){
+    if(SY.snap[k]===cur[k].h){delete SY.dirty[k]}
+    else if(SY.dirty[k]!==cur[k].h){SY.meta[k]=now;SY.dirty[k]=cur[k].h}
+  }
+  for(k in SY.snap){
+    if(SY.snap[k]!=='x'&&!(k in cur)&&SY.dirty[k]!=='x'){SY.meta[k]=now;SY.dirty[k]='x'}
+  }
+}
+function hasDirty(){return Object.keys(SY.dirty).length>0}
+function isNet(e){return !!e&&(e.name==='TypeError'||e.name==='AbortError')}
+function rpc(fn,body,cfg){
+  cfg=cfg||SY;
+  var h={'Content-Type':'application/json',apikey:cfg.key};
+  if(/^eyJ/.test(cfg.key))h.Authorization='Bearer '+cfg.key;
+  var ctl=(typeof AbortController!=='undefined')?new AbortController():null;
+  var to=ctl?setTimeout(function(){ctl.abort()},25000):0;
+  var done=function(){if(to)clearTimeout(to)};
+  return fetch(cfg.url+'/rest/v1/rpc/'+fn,{method:'POST',headers:h,body:JSON.stringify(body),signal:ctl?ctl.signal:undefined}).then(function(r){
+    return r.text().then(function(t){
+      done();
+      var j=null;try{j=t?JSON.parse(t):null}catch(e){}
+      if(!r.ok){var er=new Error((j&&(j.message||j.hint||j.error_description))||('Erreur '+r.status));er.status=r.status;er.code=j&&j.code;throw er}
+      return j})
+  },function(e){done();throw e})}
+function friendlyErr(e){
+  var m=(e&&e.message)||'';
+  if(/acces refuse/i.test(m))return 'Code refusé. Demandez une nouvelle invitation.';
+  if(/PGRST202|Could not find the function|schema cache/i.test(m+' '+((e&&e.code)||'')))return 'Le script SQL n’a pas été exécuté dans Supabase.';
+  if(isNet(e))return 'Connexion impossible. Vérifiez internet et l’adresse du projet.';
+  if(e&&(e.status===401||e.status===403))return 'Clé publique refusée. Vérifiez la clé copiée.';
+  return m||'Erreur inconnue.'}
+function setRec(r){
+  if(r.c==='journal'){DB.journal[r.i]=r.d;return}
+  if(r.c==='farm'){Object.assign(DB.farm,r.d);return}
+  var arr=DB[r.c];if(!Array.isArray(arr))return;
+  for(var i=0;i<arr.length;i++){
+    if(arr[i].id===r.i){var o=arr[i];Object.keys(o).forEach(function(k){delete o[k]});Object.assign(o,r.d);return}
+  }
+  arr.push(r.d)}
+function applyRecords(list){
+  var any=false;
+  (list||[]).forEach(function(r){
+    if(!r||KNOWN.indexOf(r.c)<0)return;
+    var k=r.c+'|'+r.i,known=(SY.snap[k]!==undefined||SY.dirty[k]!==undefined);
+    if(known&&r.u<=(SY.meta[k]||0))return;
+    if(r.x){
+      if(r.c==='journal')delete DB.journal[r.i];
+      else if(r.c!=='farm'&&Array.isArray(DB[r.c]))DB[r.c]=DB[r.c].filter(function(x){return x.id!==r.i});
+      SY.snap[k]='x';
+    }else{setRec(r);SY.snap[k]=hash(canon(r.d))}
+    SY.meta[k]=r.u;delete SY.dirty[k];any=true});
+  return any}
+function pushPending(){
+  detect();
+  var cur=enumerate(),items=[],marks=[];
+  Object.keys(SY.dirty).forEach(function(k){
+    var p=k.indexOf('|'),c=k.slice(0,p),i=k.slice(p+1);
+    if(SY.dirty[k]==='x'){items.push({c:c,i:i,d:null,x:true,u:SY.meta[k]});marks.push([k,'x'])}
+    else if(cur[k]){items.push({c:c,i:i,d:cur[k].d,x:false,u:SY.meta[k]});marks.push([k,cur[k].h])}
+  });
+  var chain=Promise.resolve();
+  for(var s=0;s<items.length;s+=150){(function(from){
+    chain=chain.then(function(){
+      return rpc('cf_push',{p_farm:SY.farm,p_key:SY.access,p_records:items.slice(from,from+150)}).then(function(){
+        marks.slice(from,from+150).forEach(function(m){if(SY.dirty[m[0]]===m[1]){SY.snap[m[0]]=m[1];delete SY.dirty[m[0]]}})})})
+  })(s)}
+  return chain}
+function statusText(){
+  var n=Object.keys(SY.dirty).length;
+  switch(SY.status){
+    case 'ok':return 'Synchronisé';
+    case 'busy':return 'Synchronisation…';
+    case 'pending':return n+' à envoyer';
+    case 'offline':return n?('Hors connexion · '+n+' à envoyer'):'Hors connexion';
+    case 'denied':return 'Accès refusé';
+    case 'err':return 'Erreur de synchronisation';
+    default:return 'Synchronisation'}}
+function pill(){if(!SY.on)return '';return '<button class="syncpill '+SY.status+'" data-act="sync-now" aria-label="Synchroniser maintenant"><i></i>'+esc(statusText())+'</button>'}
+function updatePill(){var el=$('.syncpill');if(el){el.className='syncpill '+SY.status;el.innerHTML='<i></i>'+esc(statusText())}}
+function setStatus(s,err){SY.status=s;SY.err=err||'';updatePill()}
+var syncing=false,syncAgain=false,syncTimer=null,syncStarted=false;
+function syncSoon(){clearTimeout(syncTimer);syncTimer=setTimeout(function(){syncNow()},1500)}
+function syncNow(){
+  if(!SY.on||!DB)return Promise.resolve();
+  if(syncing){syncAgain=true;return Promise.resolve()}
+  if(typeof navigator!=='undefined'&&navigator.onLine===false){detect();saveSY();setStatus('offline');return Promise.resolve()}
+  syncing=true;setStatus('busy');detect();
+  var changed=false;
+  return rpc('cf_pull',{p_farm:SY.farm,p_key:SY.access,p_since:Math.max(0,(SY.lastPull||0)-10000)}).then(function(res){
+    SY.role=res.role;SY.offset=res.now-Date.now();
+    changed=applyRecords(res.records);
+    SY.lastPull=res.now;
+    if(changed)saveRaw();
+    if(SY.role==='view')return;
+    return pushPending()
+  }).then(function(){
+    SY.last=Date.now();saveSY();
+    setStatus(hasDirty()?'pending':'ok');
+    if(changed)render();
+  }).then(null,function(e){
+    saveSY();
+    var msg=friendlyErr(e);
+    setStatus(/acces refuse/i.test((e&&e.message)||'')?'denied':(isNet(e)?'offline':'err'),msg);
+  }).then(function(){syncing=false;if(syncAgain){syncAgain=false;syncSoon()}})}
+function startSync(){
+  if(!SY.on||syncStarted)return;
+  syncStarted=true;setStatus('idle');syncSoon();
+  setInterval(function(){if(SY.on&&!document.hidden)syncNow()},45000);
+  window.addEventListener('online',function(){if(SY.on)syncNow()});
+  document.addEventListener('visibilitychange',function(){if(SY.on&&!document.hidden)syncNow()})}
+function genKey(){
+  var al='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',s='',a=new Uint8Array(24),i;
+  try{crypto.getRandomValues(a)}catch(e){for(i=0;i<24;i++)a[i]=Math.floor(Math.random()*256)}
+  for(i=0;i<24;i++)s+=al[a[i]%al.length];
+  return s}
+function cleanUrl(u){return String(u||'').trim().replace(/\/rest\/v1\/?$/,'').replace(/\/+$/,'')}
+function invitation(type){
+  var o={u:SY.url,k:SY.key,f:SY.farm,a:type==='view'?SY.viewKey:SY.access};
+  if(type!=='view'&&SY.viewKey)o.v=SY.viewKey;
+  return 'CF1.'+btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
+function decodeInvite(text){
+  var m=/CF1\.([A-Za-z0-9_-]+)/.exec(text||'');if(!m)return null;
+  try{
+    var b=m[1].replace(/-/g,'+').replace(/_/g,'/');while(b.length%4)b+='=';
+    var o=JSON.parse(decodeURIComponent(escape(atob(b))));
+    return (o&&o.u&&o.k&&o.f&&o.a)?o:null
+  }catch(e){return null}}
+function createFarm(d){
+  var url=cleanUrl(d.url),key=String(d.key||'').trim();
+  if(!/^https:\/\/\S+$/.test(url)||key.length<20)return Promise.reject(new Error('Adresse ou clé invalide.'));
+  var ek=genKey(),vk=genKey();
+  return rpc('cf_create_farm',{p_edit:ek,p_view:vk},{url:url,key:key}).then(function(id){
+    SY.on=true;SY.url=url;SY.key=key;SY.farm=id;SY.access=ek;SY.viewKey=vk;SY.role='edit';
+    SY.lastPull=0;SY.offset=0;SY.snap={};SY.meta={};SY.dirty={};SY.last=0;SY.err='';
+    detect();saveSY();startSync();
+    return syncNow()})}
+function joinFarm(text){
+  var o=decodeInvite(text);
+  if(!o)return Promise.reject(new Error('Invitation invalide. Collez le texte reçu en entier.'));
+  var cfg={url:cleanUrl(o.u),key:o.k};
+  return rpc('cf_pull',{p_farm:o.f,p_key:o.a,p_since:0},cfg).then(function(res){
+    DB=EMPTY();resetSY();
+    SY.on=true;SY.url=cfg.url;SY.key=cfg.key;SY.farm=o.f;SY.access=o.a;SY.viewKey=o.v||'';SY.role=res.role;
+    SY.offset=res.now-Date.now();
+    applyRecords(res.records);
+    SY.lastPull=res.now;SY.last=Date.now();
+    S.uid=SY.role==='view'?'__viewer__':null;S.loginFor=null;S.tab='home';
+    saveRaw();saveSY();setStatus('ok');startSync()})}
+function rotateKeys(){
+  var ek=genKey(),vk=genKey();
+  return rpc('cf_rotate',{p_farm:SY.farm,p_key:SY.access,p_edit:ek,p_view:vk}).then(function(){SY.access=ek;SY.viewKey=vk;saveSY()})}
+function copyText(text,ta,msg){
+  var fb=function(){if(ta){ta.focus();ta.select()}toast('Sélectionnez le texte puis copiez-le.')};
+  try{navigator.clipboard.writeText(text).then(function(){toast(msg||'Copié.')},fb)}catch(e){fb()}}
+function syncCard(){
+  if(!SY.on)return '<section class="card"><h3>Synchronisation en ligne</h3><p class="note">Partagez les données entre plusieurs téléphones. L’application continue de fonctionner sans connexion et se met à jour dès que le réseau revient.</p><div class="btns"><button class="btn primary" data-act="sync-setup">Activer la synchronisation</button></div></section>';
+  var last=SY.last?new Date(SY.last).toLocaleString('fr-FR',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'jamais';
+  return '<section class="card"><h3>Synchronisation en ligne</h3><p class="note">État : <b>'+esc(statusText())+'</b> · dernière synchronisation : '+esc(last)+'</p>'+(SY.err?'<p class="err">'+esc(SY.err)+'</p>':'')
+   +'<div class="btns"><button class="btn" data-act="sync-now">Synchroniser maintenant</button></div>'
+   +'<h3>Inviter</h3><p class="note">Créez d’abord le profil de la personne dans Utilisateurs, puis envoyez-lui une invitation. « Modifier » convient aux employés et aux autres propriétaires. « Observateur » donne une lecture seule, sans les finances ni la liste des utilisateurs.</p>'
+   +'<div class="btns"><button class="btn" data-act="invite" data-t="edit">Inviter pour modifier</button><button class="btn" data-act="invite" data-t="view">Inviter un observateur</button></div>'
+   +'<p class="note">Si une invitation est perdue ou mal utilisée, renouvelez les codes : les anciennes invitations cessent de fonctionner et il faut réinviter chaque téléphone.</p>'
+   +'<div class="btns"><button class="btn" data-act="sync-rotate">Renouveler les codes</button><button class="btn bad" data-act="sync-off">Désactiver ici</button></div></section>'}
+function viewerSettings(){
+  return '<h2 class="page-t">Réglages</h2><section class="card"><h3>Mode observateur</h3><p class="note">Vous consultez la ferme en lecture seule. Les données se mettent à jour automatiquement quand le téléphone est connecté.</p><p class="note">État : <b>'+esc(statusText())+'</b></p><div class="btns"><button class="btn" data-act="sync-now">Actualiser</button><button class="btn bad" data-act="sync-leave">Quitter cette ferme</button></div></section>'}
+function syncSetupForm(){
+  openForm('Activer la synchronisation',
+    '<ol class="steps"><li>Créez un compte gratuit sur <b>supabase.com</b>, puis un projet (« New project »). Choisissez une région proche, par exemple en Europe.</li><li>Dans le menu du projet, ouvrez <b>SQL Editor</b>, collez le script copié avec le bouton ci-dessous, puis touchez <b>Run</b>.</li><li>Touchez <b>Connect</b> en haut du projet : copiez l’adresse du projet et la clé « publishable ». Elles sont aussi dans <b>Settings &gt; API Keys</b>.</li><li>Collez-les ci-dessous.</li></ol><button type="button" class="btn" data-act="copy-sql">Copier le script SQL</button>'
+    +fld('Adresse du projet','url','',{attrs:'required placeholder="https://xxxx.supabase.co" inputmode="url"'})
+    +fld('Clé publique (publishable ou anon)','key','',{attrs:'required'}),
+    function(d){
+      var btn=$('#sheet button[type=submit]');if(btn){btn.disabled=true;btn.textContent='Création…'}
+      createFarm(d).then(function(){
+        closeSheet();render();
+        toast(SY.status==='ok'?'Synchronisation activée.':('Ferme créée. '+(SY.err||'')))
+      },function(e){
+        if(btn){btn.disabled=false;btn.textContent='Créer la ferme en ligne'}
+        toast(friendlyErr(e))});
+      return false},
+    {ok:'Créer la ferme en ligne'})}
+function joinForm(){
+  openForm('Rejoindre une ferme',
+    '<p class="note">Collez l’invitation reçue du propriétaire. Les données de ce téléphone seront remplacées par celles de la ferme.</p>'+fld('Invitation','code','',{type:'textarea',attrs:'required placeholder="CF1...."'}),
+    function(d){
+      var btn=$('#sheet button[type=submit]');if(btn){btn.disabled=true;btn.textContent='Connexion…'}
+      joinFarm(d.code).then(function(){closeSheet();render();toast('Ferme rejointe.')},function(e){
+        if(btn){btn.disabled=false;btn.textContent='Rejoindre'}
+        toast(friendlyErr(e))});
+      return false},
+    {ok:'Rejoindre'})}
+function inviteForm(type){
+  var view=type==='view';
+  if(view&&!SY.viewKey){toast('Cette invitation se crée depuis le téléphone qui a activé la synchronisation.');return}
+  var txt='Invitation Carnet de ferme · '+DB.farm.name+'\nAccès : '+(view?'lecture seule (observateur)':'modification')+'\nCode : '+invitation(type)+'\nOuvrez l’application, touchez « J’ai un code d’invitation » et collez ce texte.';
+  openForm(view?'Inviter un observateur':'Inviter pour modifier',
+    '<p class="note">'+(view?'Cet accès permet de tout consulter sauf les finances et les utilisateurs. Rien ne peut être modifié.':'Cet accès permet de modifier les données. La personne se connecte ensuite avec son profil dans Utilisateurs.')+'</p><textarea class="mono" id="f-invite" rows="7" readonly>'+esc(txt)+'</textarea><p class="note">Envoyez ce texte par message. Toute personne qui le reçoit obtient cet accès : ne le publiez pas.</p>',
+    function(){copyText(txt,$('#f-invite'),'Invitation copiée.');return false},{ok:'Copier'})}
+
 /* ---------- Actions ---------- */
 var acts={
   close:function(){closeSheet()},
+  'sync-setup':function(){syncSetupForm()},
+  'copy-sql':function(){copyText(SQL_TEXT,null,'Script copié. Collez-le dans SQL Editor.')},
+  'sync-now':function(){syncNow()},
+  join:function(){joinForm()},
+  invite:function(d){inviteForm(d.t)},
+  'sync-rotate':function(d,el){arm(el,'Confirmer : anciens codes révoqués',function(){rotateKeys().then(function(){render();toast('Nouveaux codes créés. Réinvitez les autres téléphones.')},function(e){toast(friendlyErr(e))})})},
+  'sync-off':function(d,el){arm(el,'Confirmer la désactivation',function(){resetSY();saveSY();render();toast('Synchronisation désactivée sur ce téléphone.')})},
+  'sync-leave':function(d,el){arm(el,'Confirmer : quitter la ferme',function(){try{localStorage.removeItem(KEY);localStorage.removeItem(SYKEY)}catch(e){}DB=null;resetSY();S.uid=null;S.tab='home';render();window.scrollTo(0,0)})},
   'sheet-del':function(d,el){arm(el,'Confirmer la suppression',function(){var f=sheetDel;closeSheet();if(f)f()})},
   goto:function(d){S.tab=d.tab;if(d.key)S.sub[d.key]=d.v;render();window.scrollTo(0,0)},
   sub:function(d){S.sub[d.key]=d.v;render()},
@@ -718,7 +956,7 @@ var acts={
     if(!u.pin){S.uid=u.id;S.tab='home';render()}
     else{S.loginFor=u.id;S.pinErr=false;render();var i=$('#f-pin');if(i)i.focus()}},
   'demo-clear':function(d,el){arm(el,'Confirmer la suppression',function(){clearDemo();render();toast('Exemples supprimés.')})},
-  reset:function(d,el){arm(el,'Confirmer : tout effacer',function(){try{localStorage.removeItem(KEY)}catch(e){}DB=null;S.uid=null;S.tab='home';render();window.scrollTo(0,0)})}
+  reset:function(d,el){arm(el,'Confirmer : tout effacer',function(){try{localStorage.removeItem(KEY);localStorage.removeItem(SYKEY)}catch(e){}DB=null;resetSY();S.uid=null;S.tab='home';render();window.scrollTo(0,0)})}
 };
 var forms={
   sheet:function(d){var r=sheetSave?sheetSave(d):undefined;if(r!==false)closeSheet()},
@@ -733,13 +971,14 @@ var forms={
     if(pinHash(d.pin||'',u.id)===u.pin){S.uid=u.id;S.loginFor=null;S.pinErr=false;S.tab='home';render()}
     else{S.pinErr=true;render();var i=$('#f-pin');if(i)i.focus()}}
 };
-document.addEventListener('click',function(e){var el=e.target.closest('[data-act]');if(!el)return;var f=acts[el.dataset.act];if(f)f(el.dataset,el)});
+var WRITE='task-new task-edit task-toggle journal-new journal-edit animal-new animal-edit health-new health-edit health-done feed-new feed-edit crop-new crop-edit act-new act-edit stock-new stock-edit move sale-new sale-edit exp-new exp-edit demo-clear'.split(' ');
+document.addEventListener('click',function(e){var el=e.target.closest('[data-act]');if(!el)return;if(RO()&&WRITE.indexOf(el.dataset.act)>=0){toast('Lecture seule : modification impossible.');return}var f=acts[el.dataset.act];if(f)f(el.dataset,el)});
 document.addEventListener('submit',function(e){var f=e.target.closest('form[data-form]');if(!f)return;e.preventDefault();var fn=forms[f.dataset.form];if(fn)fn(Object.fromEntries(new FormData(f).entries()),f)});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!$('#sheet').hidden)closeSheet()});
 
-DB=load();
-if(DB&&DB.users.length===1&&!DB.users[0].pin)S.uid=DB.users[0].id;
-render();
+DB=load();loadSY();if(SY.on&&!DB){DB=EMPTY();SY.snap={};SY.meta={};SY.dirty={};SY.lastPull=0}
+if(SY.on&&SY.role==='view')S.uid='__viewer__';else if(DB&&DB.users.length===1&&!DB.users[0].pin)S.uid=DB.users[0].id;
+render();startSync();
 })();
 </script>
 <script>
